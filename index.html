@@ -34,10 +34,11 @@
 <body>
 <div class="box" id="app">Загрузка...</div>
 <script>
-    let u = null, d = { tasks: [], calendar: [], shopping: [], notes: [], family: [] };
+    let u = null, currentScr = 'home', unsubscribes = [], d = { tasks: [], calendar: [], shopping: [], notes: [], family: [] };
     const gv = id => document.getElementById(id).value;
 
     function renderWelcome() {
+        stopListeners();
         app.innerHTML = `<h2>Family OS</h2>
             <button class="btn" onclick="renderAuth(1)">Создать семью</button>
             <button class="btn btn-sec" onclick="renderAuth(0)">Войти</button>`;
@@ -68,40 +69,46 @@
                     await db.collection('users').doc(res.user.uid).set(u);
                 }
             }
-            loadData();
+            startRealtimeSync();
         } catch(e) { alert(e.message); renderWelcome(); }
     }
 
-    async function loadData() {
+    function stopListeners() {
+        unsubscribes.forEach(unsub => unsub());
+        unsubscribes = [];
+    }
+
+    // Подключаем мгновенную синхронизацию в реальном времени (без перезагрузок)
+    function startRealtimeSync() {
         if(!u) return;
-        renderHome(); // Сразу отрисовываем интерфейс без задержек
-        try {
-            let f = u.family;
-            
-            let t = await db.collection('tasks').where('family','==',f).get().catch(()=>({docs:[]}));
-            d.tasks = t.docs.map(x => ({id: x.id, ...x.data()}));
+        stopListeners();
+        let f = u.family;
+        renderHome();
 
-            let c = await db.collection('calendar').where('family','==',f).get().catch(()=>({docs:[]}));
-            d.calendar = c.docs.map(x => ({id: x.id, ...x.data()}));
+        const bindCol = (colName, key) => {
+            let unsub = db.collection(colName).where('family', '==', f).onSnapshot(snap => {
+                if(colName === 'users') {
+                    let map = new Map();
+                    snap.docs.forEach(x => map.set(x.data().email, {id: x.id, ...x.data()}));
+                    d[key] = Array.from(map.values());
+                } else {
+                    d[key] = snap.docs.map(x => ({id: x.id, ...x.data()}));
+                }
+                // Если пользователь находится в данный момент на обновляемом экране, перерисовываем его
+                if(currentScr === key || (currentScr === 'family' && key === 'family')) setScr(currentScr, true);
+            }, err => console.log(err));
+            unsubscribes.push(unsub);
+        };
 
-            let s = await db.collection('shopping').where('family','==',f).get().catch(()=>({docs:[]}));
-            d.shopping = s.docs.map(x => ({id: x.id, ...x.data()}));
-
-            let n = await db.collection('notes').where('family','==',f).get().catch(()=>({docs:[]}));
-            d.notes = n.docs.map(x => ({id: x.id, ...x.data()}));
-
-            let us = await db.collection('users').where('family','==',f).get().catch(()=>({docs:[]}));
-            let map = new Map();
-            us.docs.forEach(x => map.set(x.data().email, {id: x.id, ...x.data()}));
-            d.family = Array.from(map.values());
-
-            renderHome(); // Перерисовываем с актуальными данными из базы
-        } catch(e) {
-            console.error(e);
-        }
+        bindCol('tasks', 'tasks');
+        bindCol('calendar', 'calendar');
+        bindCol('shopping', 'shopping');
+        bindCol('notes', 'notes');
+        bindCol('users', 'family');
     }
 
     function renderHome() {
+        currentScr = 'home';
         app.innerHTML = `
             <div style="display:flex; justify-content:space-between; font-size:12px; color:#94a3b8; margin-bottom:15px;">
                 <span>👤 ${u.name} (${u.family}) [Код: <b>${u.code}</b>]</span>
@@ -118,7 +125,8 @@
             </div>`;
     }
 
-    function setScr(s) {
+    function setScr(s, isRefresh = false) {
+        currentScr = s;
         let back = `<button class="btn btn-sec" style="margin-bottom:10px;" onclick="renderHome()">Назад</button>`;
         if(s === 'tasks') {
             app.innerHTML = `<h2>Задачи</h2> ${back}
@@ -158,9 +166,18 @@
         }
     }
 
-    async function add(col, obj) { if(obj.title) { obj.family = u.family; await db.collection(col).add(obj); loadData(); setScr(col); } }
-    async function update(col, id, obj) { await db.collection(col).doc(id).update(obj); loadData(); }
-    async function removeItem(col, id) { if(confirm('Удалить?')) { await db.collection(col).doc(id).delete(); loadData(); } }
+    async function add(col, obj) { 
+        if(obj.title) { 
+            obj.family = u.family; 
+            await db.collection(col).add(obj); 
+            if(col === 'tasks') document.getElementById('tTitle').value = '';
+            if(col === 'calendar') document.getElementById('cTitle').value = '';
+            if(col === 'shopping') document.getElementById('sTitle').value = '';
+            if(col === 'notes') { document.getElementById('nTitle').value = ''; document.getElementById('nText').value = ''; }
+        } 
+    }
+    async function update(col, id, obj) { await db.collection(col).doc(id).update(obj); }
+    async function removeItem(col, id) { if(confirm('Удалить?')) { await db.collection(col).doc(id).delete(); } }
     function setTheme(bg, card, accent, text, border) {
         let r = document.documentElement.style;
         r.setProperty('--bg', bg); r.setProperty('--card', card); r.setProperty('--accent', accent); r.setProperty('--text', text); r.setProperty('--border', border);
