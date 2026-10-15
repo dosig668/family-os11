@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Family OS</title>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script>
+        firebase.initializeApp({
+            apiKey: "AIzaSyCJ0bYRoOeXNysiZ9MEBCP_2sn0KtDaTeQ",
+            authDomain: "andrejs-1849a.firebaseapp.com",
+            projectId: "andrejs-1849a",
+            storageBucket: "andrejs-1849a.firebasestorage.app",
+            messagingSenderId: "518706815224",
+            appId: "1:518706815224:web:7c74080ae383a01193db0d"
+        });
+        const db = firebase.firestore(), auth = firebase.auth();
+        window.onload = () => renderWelcome();
+    </script>
+    <style>
+        :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #3b82f6; --border: #334155; }
+        body { font-family: sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .box { width: 100%; max-width: 420px; background: var(--card); border-radius: 20px; padding: 20px; box-sizing: border-box; box-shadow: 0 10px 25px rgba(0,0,0,0.5); border: 1px solid var(--border); }
+        h2 { text-align: center; margin-top: 0; }
+        .btn { background: var(--accent); color: white; border: none; padding: 10px; border-radius: 10px; width: 100%; cursor: pointer; font-weight: bold; margin-top: 10px; }
+        .btn-sec { background: #475569; }
+        .btn-danger { background: #ef4444; }
+        input, select, textarea { width: 100%; padding: 10px; margin: 8px 0; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); box-sizing: border-box; }
+        .card { background: var(--bg); padding: 10px; border-radius: 8px; margin-bottom: 8px; border-left: 4px solid var(--accent); display: flex; justify-content: space-between; align-items: center; }
+    </style>
+</head>
+<body>
+<div class="box" id="app">Загрузка...</div>
+<script>
+    let u = null, d = { tasks: [], calendar: [], shopping: [], notes: [], family: [] };
+    const gv = id => document.getElementById(id).value;
+
+    function renderWelcome() {
+        app.innerHTML = `<h2>Family OS</h2>
+            <button class="btn" onclick="renderAuth(1)">Создать семью</button>
+            <button class="btn btn-sec" onclick="renderAuth(0)">Войти</button>`;
+    }
+
+    function renderAuth(isReg) {
+        app.innerHTML = `<h2>${isReg ? 'Регистрация' : 'Вход'}</h2>
+            <input type="email" id="email" placeholder="Email"><input type="password" id="pass" placeholder="Пароль">
+            ${isReg ? '<input type="text" id="name" placeholder="Имя"><input type="text" id="family" placeholder="Семья"><input type="text" id="code" placeholder="Код (необязательно)">' : ''}
+            <button class="btn" onclick="handleAuth(${isReg})">${isReg ? 'Продолжить' : 'Войти'}</button>
+            <button class="btn btn-sec" onclick="renderWelcome()">Назад</button>`;
+    }
+
+    async function handleAuth(isReg) {
+        try {
+            let email = gv('email'), pass = gv('pass');
+            if(isReg) {
+                let res = await auth.createUserWithEmailAndPassword(email, pass);
+                u = { name: gv('name'), family: gv('family'), code: gv('code') || Math.random().toString(36).substring(2,6).toUpperCase(), email, role: 'Администратор' };
+                await db.collection('users').doc(res.user.uid).set(u);
+            } else {
+                let res = await auth.signInWithEmailAndPassword(email, pass);
+                let doc = await db.collection('users').doc(res.user.uid).get();
+                if(doc.exists) {
+                    u = doc.data();
+                } else {
+                    u = { name: email.split('@')[0], family: 'Семья', code: '0000', email, role: 'Ребенок' };
+                    await db.collection('users').doc(res.user.uid).set(u);
+                }
+            }
+            loadData();
+        } catch(e) { alert(e.message); renderWelcome(); }
+    }
+
+    async function loadData() {
+        if(!u) return;
+        renderHome(); // Сразу отрисовываем интерфейс без задержек
+        try {
+            let f = u.family;
+            
+            let t = await db.collection('tasks').where('family','==',f).get().catch(()=>({docs:[]}));
+            d.tasks = t.docs.map(x => ({id: x.id, ...x.data()}));
+
+            let c = await db.collection('calendar').where('family','==',f).get().catch(()=>({docs:[]}));
+            d.calendar = c.docs.map(x => ({id: x.id, ...x.data()}));
+
+            let s = await db.collection('shopping').where('family','==',f).get().catch(()=>({docs:[]}));
+            d.shopping = s.docs.map(x => ({id: x.id, ...x.data()}));
+
+            let n = await db.collection('notes').where('family','==',f).get().catch(()=>({docs:[]}));
+            d.notes = n.docs.map(x => ({id: x.id, ...x.data()}));
+
+            let us = await db.collection('users').where('family','==',f).get().catch(()=>({docs:[]}));
+            let map = new Map();
+            us.docs.forEach(x => map.set(x.data().email, {id: x.id, ...x.data()}));
+            d.family = Array.from(map.values());
+
+            renderHome(); // Перерисовываем с актуальными данными из базы
+        } catch(e) {
+            console.error(e);
+        }
+    }
+
+    function renderHome() {
+        app.innerHTML = `
+            <div style="display:flex; justify-content:space-between; font-size:12px; color:#94a3b8; margin-bottom:15px;">
+                <span>👤 ${u.name} (${u.family}) [Код: <b>${u.code}</b>]</span>
+                <button onclick="auth.signOut(); renderWelcome();" style="background:none;border:none;color:#ef4444;cursor:pointer;">Выйти</button>
+            </div>
+            <h2>Рабочий стол</h2>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <button class="btn btn-sec" onclick="setScr('tasks')">📋 Задачи</button>
+                <button class="btn btn-sec" onclick="setScr('calendar')">📅 Календарь</button>
+                <button class="btn btn-sec" onclick="setScr('shopping')">🛒 Покупки</button>
+                <button class="btn btn-sec" onclick="setScr('notes')">📝 Заметки</button>
+                <button class="btn btn-sec" onclick="setScr('family')">👥 Семья</button>
+                <button class="btn btn-sec" onclick="setScr('settings')">⚙️ Темы</button>
+            </div>`;
+    }
+
+    function setScr(s) {
+        let back = `<button class="btn btn-sec" style="margin-bottom:10px;" onclick="renderHome()">Назад</button>`;
+        if(s === 'tasks') {
+            app.innerHTML = `<h2>Задачи</h2> ${back}
+                <input type="text" id="tTitle" placeholder="Название"><select id="tAssign"><option>Всем</option>${d.family.map(m=>`<option>${m.name}</option>`).join('')}</select>
+                <button class="btn" onclick="add('tasks', {title:gv('tTitle'), assignee:gv('tAssign'), status:'Не начато'})">Добавить</button>
+                ${d.tasks.map(x=>`<div class="card"><div><b>${x.title}</b><br><small>${x.assignee}</small>
+                <select onchange="update('tasks','${x.id}',{status:this.value})" style="margin-top:5px;padding:4px;"><option ${x.status=='Не начато'?'selected':''}>Не начато</option><option ${x.status=='В процессе'?'selected':''}>В процессе</option><option ${x.status=='Выполнено'?'selected':''}>Выполнено</option></select></div>
+                <button class="btn-danger" style="padding:6px 10px;border:none;border-radius:6px;cursor:pointer;" onclick="removeItem('tasks','${x.id}')">✕</button></div>`).join('')}`;
+        } else if(s === 'calendar') {
+            app.innerHTML = `<h2>Календарь</h2> ${back}
+                <input type="date" id="cDate" value="${new Date().toISOString().split('T')[0]}"><input type="text" id="cTitle" placeholder="Событие">
+                <button class="btn" onclick="add('calendar', {title:gv('cTitle'), date:gv('cDate')})">Добавить</button>
+                ${d.calendar.map(x=>`<div class="card"><div><b>📅 ${x.date}</b>:${x.title}</div>
+                <button class="btn-danger" style="padding:6px 10px;border:none;border-radius:6px;cursor:pointer;" onclick="removeItem('calendar','${x.id}')">✕</button></div>`).join('')}`;
+        } else if(s === 'shopping') {
+            app.innerHTML = `<h2>Покупки</h2> ${back}
+                <input type="text" id="sTitle" placeholder="Что купить?"><button class="btn" onclick="add('shopping', {title:gv('sTitle'), status:'Нужно'})">Добавить</button>
+                ${d.shopping.map(x=>`<div class="card"><span style="${x.status=='Куплено'?'text-decoration:line-through;color:#94a3b8':''}">${x.title}</span>
+                <div style="display:flex;gap:5px;align-items:center;">
+                <select onchange="update('shopping','${x.id}',{status:this.value})" style="padding:4px;"><option>Нужно</option><option>Покупаю</option><option>Куплено</option></select>
+                <button class="btn-danger" style="padding:6px 10px;border:none;border-radius:6px;cursor:pointer;" onclick="removeItem('shopping','${x.id}')">✕</button></div></div>`).join('')}`;
+        } else if(s === 'notes') {
+            app.innerHTML = `<h2>Заметки</h2> ${back}
+                <input type="text" id="nTitle" placeholder="Заголовок"><textarea id="nText" placeholder="Текст"></textarea>
+                <button class="btn" onclick="add('notes', {title:gv('nTitle'), text:gv('nText')})">Сохранить</button>
+                ${d.notes.map(x=>`<div class="card"><div><b>${x.title}</b><br>${x.text}</div>
+                <button class="btn-danger" style="padding:6px 10px;border:none;border-radius:6px;cursor:pointer;" onclick="removeItem('notes','${x.id}')">✕</button></div>`).join('')}`;
+        } else if(s === 'family') {
+            app.innerHTML = `<h2>Семья</h2> ${back}<p style="font-size:12px;color:#94a3b8;text-align:center;">Код: <b>${u.code}</b></p>
+                ${d.family.map(x=>`<div class="card" style="flex-direction:column;align-items:flex-start;gap:6px;">
+                <div style="width:100%;display:flex;justify-content:space-between;"><b>${x.name}</b><button class="btn-danger" style="padding:4px 8px;border:none;border-radius:6px;" onclick="removeItem('users','${x.id}')">✕</button></div>
+                <select onchange="update('users','${x.id}',{role:this.value})" style="padding:4px;"><option ${x.role=='Администратор'?'selected':''}>Администратор</option><option ${x.role=='Взрослый'?'selected':''}>Взрослый</option><option ${x.role=='Ребенок'?'selected':''}>Ребенок</option></select></div>`).join('')}`;
+        } else if(s === 'settings') {
+            app.innerHTML = `<h2>Темы</h2> ${back}
+                <button class="btn" onclick="setTheme('#0f172a','#1e293b','#3b82f6','#f8fafc','#334155')">🌌 Космическая</button>
+                <button class="btn btn-sec" onclick="setTheme('#f1f5f9','#ffffff','#2563eb','#0f172a','#cbd5e1')">☀️ Светлая</button>`;
+        }
+    }
+
+    async function add(col, obj) { if(obj.title) { obj.family = u.family; await db.collection(col).add(obj); loadData(); setScr(col); } }
+    async function update(col, id, obj) { await db.collection(col).doc(id).update(obj); loadData(); }
+    async function removeItem(col, id) { if(confirm('Удалить?')) { await db.collection(col).doc(id).delete(); loadData(); } }
+    function setTheme(bg, card, accent, text, border) {
+        let r = document.documentElement.style;
+        r.setProperty('--bg', bg); r.setProperty('--card', card); r.setProperty('--accent', accent); r.setProperty('--text', text); r.setProperty('--border', border);
+    }
+</script>
+</body>
+</html>
